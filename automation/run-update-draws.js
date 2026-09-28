@@ -3,14 +3,26 @@
 // Pensado para correr varias veces al dia (una vez despues de cada
 // sorteo) desde GitHub Actions (ver .github/workflows/), avisando por
 // Telegram solo el numero NUEVO que salio, sin repetir los anteriores.
+//
+// Se consultan DOS fuentes:
+//  - loteriaypiramides.com/historico: fuente principal, mas completa
+//    (trae ~10 dias de historico en una sola pagina).
+//  - yelu.cr/lottery/results/nuevos-tiempos: fuente de respaldo que en
+//    la practica publica el resultado de cada sorteo mas rapido. Se usa
+//    solo para llenar sorteos de HOY que el historico todavia no tenga
+//    (mismo esquema de "draw_id" en ambos sitios, asi que no hay riesgo
+//    de duplicados: cuando el historico se pone al dia, sobreescribe el
+//    mismo documento con los mismos datos).
 
 const fetch = require('node-fetch');
 const { db } = require('./firebaseAdmin');
 const { parseHistoricoHtml } = require('./lib/parseHistorico');
+const { parseYeluResultsHtml } = require('./lib/parseYelu');
 const { computeStats } = require('./lib/stats');
 const { sendTelegram } = require('./telegram');
 
 const HISTORICO_URL = 'https://loteriaypiramides.com/costa-rica/nuevos-tiempos/historico';
+const YELU_RESULTS_URL = 'https://www.yelu.cr/lottery/results/nuevos-tiempos';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 function todayCR() {
@@ -29,6 +41,33 @@ async function main() {
   if (rows.length === 0) {
     console.warn('updateDraws: no se parseo ninguna fila, no se actualiza nada.');
     return;
+  }
+
+  // Respaldo rapido: si yelu.cr ya tiene sorteos de HOY que el historico
+  // todavia no publico, los agregamos aqui (por draw_id, sin duplicar).
+  const seenIds = new Set(rows.map(r => r.draw_id));
+  try {
+    const yeluRes = await fetch(YELU_RESULTS_URL, { headers: { 'User-Agent': UA } });
+    if (yeluRes.ok) {
+      const yeluHtml = await yeluRes.text();
+      const yeluRows = parseYeluResultsHtml(yeluHtml);
+      const today = todayCR();
+      let agregados = 0;
+      for (const r of yeluRows) {
+        if (r.date === today && !seenIds.has(r.draw_id)) {
+          rows.push(r);
+          seenIds.add(r.draw_id);
+          agregados++;
+        }
+      }
+      if (agregados > 0) {
+        console.log(`updateDraws: ${agregados} sorteo(s) de hoy tomados de yelu.cr (aun no estaban en el historico).`);
+      }
+    } else {
+      console.warn(`updateDraws: yelu.cr respondio ${yeluRes.status}, se sigue solo con el historico.`);
+    }
+  } catch (err) {
+    console.warn('updateDraws: no se pudo consultar yelu.cr como respaldo:', err.message);
   }
 
   const firestore = db();
