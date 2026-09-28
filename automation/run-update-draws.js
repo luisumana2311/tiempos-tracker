@@ -1,6 +1,8 @@
 // Equivalente standalone de la funcion updateDraws: trae el historico
 // reciente de sorteos y recalcula las estadisticas del dashboard.
-// Pensado para correr desde GitHub Actions (ver .github/workflows/).
+// Pensado para correr varias veces al dia (una vez despues de cada
+// sorteo) desde GitHub Actions (ver .github/workflows/), avisando por
+// Telegram solo el numero NUEVO que salio, sin repetir los anteriores.
 
 const fetch = require('node-fetch');
 const { db } = require('./firebaseAdmin');
@@ -46,30 +48,45 @@ async function main() {
 
   console.log(`updateDraws: stats recalculadas sobre ${allDraws.length} sorteos totales.`);
 
-  // --- Aviso por Telegram: numeros de hoy + alertas estadisticas ---
+  // --- Aviso por Telegram: SOLO el/los sorteo(s) nuevo(s) de hoy que no se hayan avisado todavia ---
   const today = todayCR();
   const todays = rows
     .filter(r => r.date === today)
     .sort((a, b) => (SLOT_ORDER[a.slot] ?? 9) - (SLOT_ORDER[b.slot] ?? 9));
 
-  const lines = [`🎰 <b>Nuevos Tiempos — ${today}</b>`];
   if (todays.length === 0) {
-    lines.push('Todavia no hay sorteos de hoy registrados.');
-  } else {
-    for (const r of todays) {
-      lines.push(`${r.slot}: <b>${r.numero}</b>${r.reventado ? ' 🔴 reventado' : ''}`);
-    }
+    console.log('updateDraws: todavia no hay sorteos de hoy, no se avisa nada.');
+    return;
   }
 
-  const alerts = [];
-  if (stats.p_total < 0.05) alerts.push(`⚠️ p-value de distribucion total: ${(stats.p_total * 100).toFixed(2)}% (posible desviacion, revisar)`);
-  if (stats.p_eo < 0.05) alerts.push(`⚠️ p-value par/impar: ${(stats.p_eo * 100).toFixed(2)}% (posible desviacion, revisar)`);
-  if (stats.p_last < 0.05) alerts.push(`⚠️ p-value ultimo digito: ${(stats.p_last * 100).toFixed(2)}% (posible desviacion, revisar)`);
-  if (alerts.length) {
-    lines.push('', ...alerts);
+  const notifyRef = firestore.collection('notify_state').doc(today);
+  const notifySnap = await notifyRef.get();
+  const alreadyNotified = notifySnap.exists ? (notifySnap.data().slots || []) : [];
+
+  const newOnes = todays.filter(r => !alreadyNotified.includes(r.slot));
+  if (newOnes.length === 0) {
+    console.log('updateDraws: no hay sorteos nuevos desde el ultimo aviso, no se manda Telegram.');
+    return;
+  }
+
+  const lines = [`🎰 <b>Nuevos Tiempos — ${today}</b>`];
+  for (const r of newOnes) {
+    lines.push(`${r.slot}: <b>${r.numero}</b>${r.reventado ? ' 🔴 reventado' : ''}`);
+  }
+
+  // Las alertas estadisticas solo se mandan una vez al dia, cuando ya salio
+  // el sorteo de la Noche (para no repetir el mismo aviso 3 veces al dia).
+  const allSlotsIn = new Set([...alreadyNotified, ...newOnes.map(r => r.slot)]);
+  if (allSlotsIn.has('Noche')) {
+    const alerts = [];
+    if (stats.p_total < 0.05) alerts.push(`⚠️ p-value de distribucion total: ${(stats.p_total * 100).toFixed(2)}% (posible desviacion, revisar)`);
+    if (stats.p_eo < 0.05) alerts.push(`⚠️ p-value par/impar: ${(stats.p_eo * 100).toFixed(2)}% (posible desviacion, revisar)`);
+    if (stats.p_last < 0.05) alerts.push(`⚠️ p-value ultimo digito: ${(stats.p_last * 100).toFixed(2)}% (posible desviacion, revisar)`);
+    if (alerts.length) lines.push('', ...alerts);
   }
 
   await sendTelegram(lines.join('\n'));
+  await notifyRef.set({ slots: [...allSlotsIn] });
 }
 
 main().then(() => process.exit(0)).catch(err => { console.error(err); process.exit(1); });

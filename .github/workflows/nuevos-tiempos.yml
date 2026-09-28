@@ -5,7 +5,10 @@ on:
     # Costa Rica es UTC-6 todo el año (sin horario de verano).
     - cron: '41 14 * * *'   # 8:41am CR -> capturar predicciones del dia
     - cron: '35 2 * * *'    # 8:35pm CR (dia anterior en UTC) -> calificar predicciones
-    - cron: '12 3 * * *'    # 9:12pm CR (dia anterior en UTC) -> actualizar sorteos
+    - cron: '10 19 * * *'   # 1:10pm CR -> chequear sorteo Mediodia (~12:55pm) y avisar
+    - cron: '45 22 * * *'   # 4:45pm CR -> chequear sorteo Tarde (~4:30pm) y avisar
+    - cron: '45 1 * * *'    # 7:45pm CR (en UTC del dia siguiente) -> chequear sorteo Noche (~7:30pm) y avisar
+    - cron: '12 3 * * *'    # 9:12pm CR -> pasada final de respaldo por si algun chequeo anterior fallo
   workflow_dispatch:
     inputs:
       job:
@@ -51,7 +54,7 @@ jobs:
         run: node run-score-predictions.js
 
       - name: Actualizar sorteos y estadisticas
-        if: github.event.schedule == '12 3 * * *' || github.event.inputs.job == 'update-draws'
+        if: contains(fromJSON('["12 3 * * *","10 19 * * *","45 22 * * *","45 1 * * *"]'), github.event.schedule) || github.event.inputs.job == 'update-draws'
         working-directory: automation
         env:
           GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
