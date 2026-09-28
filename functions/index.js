@@ -14,9 +14,9 @@ const db = admin.firestore();
 setGlobalOptions({ region: 'us-central1', timeoutSeconds: 120, memory: '256MiB' });
 
 const TZ = 'America/Costa_Rica';
-const HISTORICO_URL = 'https://www.loteriaypiramides.com/costa-rica/nuevos-tiempos/historico';
-const YELU_HOY_URL = 'https://www.yelu.cr/jps-numeros-suerte-hoy';
-const YELU_HOTCOLD_URL = 'https://www.yelu.cr/hot-cold-numbers/nuevos-tiempos';
+const HISTORICO_URL = 'https://loteriaypiramides.com/costa-rica/nuevos-tiempos/historico';
+const YELU_HOY_URL = 'https://www.yelu.cr/lottery/jps-numeros-suerte-hoy';
+const YELU_HOTCOLD_URL = 'https://www.yelu.cr/lottery/hot-cold-numbers/nuevos-tiempos';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
