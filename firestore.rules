@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Todo el mundo puede leer los datos (dashboard publico).
+    // Nadie escribe desde el cliente: solo las Cloud Functions (Admin SDK) escriben.
+    match /{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

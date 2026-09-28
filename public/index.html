@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nuevos Tiempos a examen</title>
+<meta name="description" content="Analisis estadistico independiente de los sorteos de Nuevos Tiempos JPS Costa Rica: pruebas de aleatoriedad actualizadas cada dia.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <h1>Nuevos Tiempos a examen</h1>
+  <p class="tagline">Analisis estadistico independiente de los sorteos de JPS Costa Rica. Se actualiza solo, todas las noches.</p>
+  <nav class="tabs">
+    <a href="index.html" class="active">Analisis</a>
+    <a href="predicciones.html">Predicciones bajo la lupa</a>
+  </nav>
+
+  <div id="content">
+    <p class="loading">Cargando datos en vivo desde Firestore...</p>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import { getFirestore, doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+
+const app = initializeApp(); // usa la config auto-inyectada por Firebase Hosting (/__/firebase/init.js)
+const db = getFirestore(app);
+
+const content = document.getElementById('content');
+
+function pct(p) { return (p * 100).toFixed(2) + '%'; }
+function verdict(p) { return p > 0.05 ? 'ok' : 'warn'; }
+function verdictText(p) { return p > 0.05 ? 'sin desviacion significativa' : 'posible desviacion (revisar)'; }
+
+function numChips(pairs, cls) {
+  return pairs.map(([num, count]) =>
+    `<span class="num-chip ${cls}">${String(num).padStart(2,'0')} <span style="opacity:.6">(${count})</span></span>`
+  ).join('');
+}
+
+onSnapshot(doc(db, 'stats', 'latest'), (snap) => {
+  if (!snap.exists()) {
+    content.innerHTML = '<p class="loading">Aun no hay datos. La primera actualizacion automatica llega esta noche.</p>';
+    return;
+  }
+  const s = snap.data();
+  content.innerHTML = `
+    <p class="updated">Basado en ${s.n.toLocaleString('es-CR')} sorteos, del ${s.date_from} al ${s.date_to}. Ultima actualizacion: ${new Date(s.updated_at).toLocaleString('es-CR')}</p>
+
+    <div class="card">
+      <h2>Distribucion de los 100 numeros (00-99)</h2>
+      <div class="grid">
+        <div class="stat"><div class="label">Chi-cuadrado</div><div class="value">${s.chi2_total}</div></div>
+        <div class="stat"><div class="label">p-value</div><div class="value ${verdict(s.p_total)}">${pct(s.p_total)}</div></div>
+      </div>
+      <p class="note">${verdictText(s.p_total)}. Con 99 grados de libertad, un p-value bajo (&lt; 5%) indicaria que algunos numeros salen mas de lo que el azar explicaria.</p>
+    </div>
+
+    <div class="card">
+      <h2>Par / impar</h2>
+      <div class="grid">
+        <div class="stat"><div class="label">Pares</div><div class="value">${s.even.toLocaleString('es-CR')}</div></div>
+        <div class="stat"><div class="label">Impares</div><div class="value">${s.odd.toLocaleString('es-CR')}</div></div>
+        <div class="stat"><div class="label">p-value</div><div class="value ${verdict(s.p_eo)}">${pct(s.p_eo)}</div></div>
+      </div>
+      <p class="note">${verdictText(s.p_eo)} frente al 50/50 esperado.</p>
+    </div>
+
+    <div class="card">
+      <h2>Por horario de sorteo</h2>
+      <table>
+        <thead><tr><th>Horario</th><th class="mono">n</th><th class="mono">chi2</th><th class="mono">p-value</th></tr></thead>
+        <tbody>
+          ${Object.entries(s.slot_stats).map(([slot, v]) => `
+            <tr><td>${slot}</td><td class="mono">${v.n}</td><td class="mono">${v.chi2}</td><td class="mono ${verdict(v.p)}">${pct(v.p)}</td></tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <p class="note">Si cada horario se comportara distinto a los demas, seria una pista de algo no aleatorio. No es el caso aqui.</p>
+    </div>
+
+    <div class="card">
+      <h2>Reventados</h2>
+      <div class="grid">
+        <div class="stat"><div class="label">Tasa observada</div><div class="value">${pct(s.red_rate)}</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Numeros mas y menos frecuentes</h2>
+      <p class="note">Caliente (top 8):</p>
+      <div class="numbers-list">${numChips(s.hot, '')}</div>
+      <p class="note" style="margin-top:14px;">Frio (bottom 8):</p>
+      <div class="numbers-list">${numChips(s.cold, 'cold')}</div>
+      <p class="note" style="margin-top:14px;">Esta variacion es normal incluso en un sistema perfectamente aleatorio: con ${s.n.toLocaleString('es-CR')} sorteos y 100 numeros posibles, algo de diferencia entre el mas y el menos frecuente se espera solo por azar.</p>
+    </div>
+
+    <div class="card">
+      <h2>Metodologia</h2>
+      <p class="note">
+        Los datos se recolectan cada noche desde el historico publico de sorteos. Se aplican pruebas
+        chi-cuadrado de bondad de ajuste (comparando la distribucion observada contra la uniforme
+        esperada) sobre: el numero completo (00-99), el primer digito, el ultimo digito, y cada horario
+        por separado. Tambien se prueba par/impar contra 50/50 con una prueba binomial normal.
+        Un p-value bajo no prueba que el sorteo este manipulado; solo senala una desviacion estadistica
+        que ameritaria mas seguimiento.
+      </p>
+    </div>
+  `;
+});
+</script>
+</body>
+</html>

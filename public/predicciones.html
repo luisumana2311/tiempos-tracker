@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Predicciones bajo la lupa</title>
+<meta name="description" content="Seguimiento diario de sitios que dicen predecir numeros calientes de Nuevos Tiempos, comparado contra la probabilidad esperada por puro azar.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <h1>Predicciones bajo la lupa</h1>
+  <p class="tagline">Sitios que dicen saber que numero esta "caliente", puestos a prueba contra el azar. Se captura cada manana y se califica cada noche, solo.</p>
+  <nav class="tabs">
+    <a href="index.html">Analisis</a>
+    <a href="predicciones.html" class="active">Predicciones bajo la lupa</a>
+  </nav>
+
+  <div id="today"><p class="loading">Cargando predicciones de hoy...</p></div>
+  <div id="summary"></div>
+  <div id="history"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import { getFirestore, doc, onSnapshot, collection, query, where, orderBy, limit, getDocs } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+
+const app = initializeApp();
+const db = getFirestore(app);
+
+function todayCR() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Costa_Rica', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
+function chips(numbers) {
+  return numbers.map(n => `<span class="num-chip">${n}</span>`).join('');
+}
+
+function pillFor(hit) {
+  if (hit === null || hit === undefined) return '<span class="pill pending">pendiente</span>';
+  return hit ? '<span class="pill hit">acerto</span>' : '<span class="pill miss">no acerto</span>';
+}
+
+async function renderToday() {
+  const date = todayCR();
+  const q = query(collection(db, 'predictions'), where('date', '==', date));
+  const snap = await getDocs(q);
+  const el = document.getElementById('today');
+  if (snap.empty) {
+    el.innerHTML = '<div class="card"><h2>Hoy</h2><p class="note">Aun no se ha capturado la prediccion de hoy (llega en la manana, hora Costa Rica).</p></div>';
+    return;
+  }
+  const rows = snap.docs.map(d => d.data());
+  el.innerHTML = `
+    <div class="card">
+      <h2>Hoy (${date})</h2>
+      ${rows.map(r => `
+        <div style="margin-bottom:14px;">
+          <p class="note" style="margin-bottom:6px;"><strong>${r.kind}</strong> · baseline por azar: ${r.baseline_pct}% &nbsp; ${pillFor(r.hit)}</p>
+          <div class="numbers-list">${chips(r.numbers)}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+onSnapshot(doc(db, 'predictions_summary', 'latest'), (snap) => {
+  const el = document.getElementById('summary');
+  if (!snap.exists()) { el.innerHTML = ''; return; }
+  const s = snap.data();
+  const rows = Object.entries(s.sources);
+  el.innerHTML = `
+    <div class="card">
+      <h2>Historial de aciertos por fuente</h2>
+      <table>
+        <thead><tr><th>Fuente</th><th>Tipo</th><th class="mono">Dias</th><th class="mono">Acierto real</th><th class="mono">Esperado por azar</th></tr></thead>
+        <tbody>
+          ${rows.map(([source, v]) => `
+            <tr>
+              <td>${source}</td>
+              <td>${v.kind}</td>
+              <td class="mono">${v.days}</td>
+              <td class="mono ${v.hit_rate_pct >= v.baseline_pct ? '' : ''}">${v.hit_rate_pct}%</td>
+              <td class="mono">${v.baseline_pct}%</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <p class="note">Si "acierto real" se mantiene cerca de "esperado por azar" con el paso de los dias, esa fuente no esta prediciendo mejor que tirar un dado. Actualizado: ${new Date(s.updated_at).toLocaleString('es-CR')}</p>
+    </div>
+  `;
+});
+
+async function renderHistory() {
+  const q = query(collection(db, 'predictions'), orderBy('date', 'desc'), limit(30));
+  const snap = await getDocs(q);
+  const el = document.getElementById('history');
+  if (snap.empty) { el.innerHTML = ''; return; }
+  const rows = snap.docs.map(d => d.data());
+  el.innerHTML = `
+    <div class="card">
+      <h2>Ultimos 30 registros</h2>
+      <table>
+        <thead><tr><th>Fecha</th><th>Fuente</th><th>Resultado</th><th>Sorteo</th></tr></thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr><td class="mono">${r.date}</td><td>${r.source}</td><td>${pillFor(r.hit)}</td><td class="mono">${r.matched_draw || '-'}</td></tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+renderToday();
+renderHistory();
+</script>
+</body>
+</html>
