@@ -25,7 +25,11 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import { getFirestore, doc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
-const app = initializeApp(); // usa la config auto-inyectada por Firebase Hosting (/__/firebase/init.js)
+// El auto-init de Firebase Hosting (/__/firebase/init.js) solo funciona con
+// el SDK "compat" via <script>; con el SDK modular hay que traer la config
+// explicitamente desde /__/firebase/init.json y pasarsela a initializeApp.
+const firebaseConfig = await fetch('/__/firebase/init.json').then(r => r.json());
+const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 const content = document.getElementById('content');

@@ -25,7 +25,8 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import { getFirestore, doc, onSnapshot, collection, query, where, orderBy, limit, getDocs } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
-const app = initializeApp();
+const firebaseConfig = await fetch('/__/firebase/init.json').then(r => r.json());
+const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 function todayCR() {
