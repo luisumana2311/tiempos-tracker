@@ -50,8 +50,10 @@ function computeStats(draws) {
     slotStats[slot] = { n: arr.reduce((s, v) => s + v, 0), chi2: t.chi2, p: t.p };
   }
 
-  const hot = freq.map((c, num) => [num, c]).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  const cold = freq.map((c, num) => [num, c]).sort((a, b) => a[1] - b[1]).slice(0, 8);
+  // Firestore no permite arrays anidados (array dentro de array), asi que
+  // se guardan como objetos {num, count} en vez de pares [num, count].
+  const hot = freq.map((c, num) => ({ num, count: c })).sort((a, b) => b.count - a.count).slice(0, 8);
+  const cold = freq.map((c, num) => ({ num, count: c })).sort((a, b) => a.count - b.count).slice(0, 8);
 
   return {
     n,

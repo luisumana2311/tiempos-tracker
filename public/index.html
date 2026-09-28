@@ -34,8 +34,8 @@ function pct(p) { return (p * 100).toFixed(2) + '%'; }
 function verdict(p) { return p > 0.05 ? 'ok' : 'warn'; }
 function verdictText(p) { return p > 0.05 ? 'sin desviacion significativa' : 'posible desviacion (revisar)'; }
 
-function numChips(pairs, cls) {
-  return pairs.map(([num, count]) =>
+function numChips(items, cls) {
+  return items.map(({ num, count }) =>
     `<span class="num-chip ${cls}">${String(num).padStart(2,'0')} <span style="opacity:.6">(${count})</span></span>`
   ).join('');
 }
