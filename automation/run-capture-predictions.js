@@ -3,7 +3,7 @@
 
 const fetch = require('node-fetch');
 const { db } = require('./firebaseAdmin');
-const { parseHot30Cold30, parseNuevosTiemposHoy } = require('../functions/parseYelu');
+const { parseHot30Cold30, parseNuevosTiemposHoy } = require('./lib/parseYelu');
 
 const YELU_HOY_URL = 'https://www.yelu.cr/jps-numeros-suerte-hoy';
 const YELU_HOTCOLD_URL = 'https://www.yelu.cr/hot-cold-numbers/nuevos-tiempos';

@@ -4,8 +4,8 @@
 
 const fetch = require('node-fetch');
 const { db } = require('./firebaseAdmin');
-const { parseHistoricoHtml } = require('../functions/parseHistorico');
-const { computeStats } = require('../functions/stats');
+const { parseHistoricoHtml } = require('./lib/parseHistorico');
+const { computeStats } = require('./lib/stats');
 
 const HISTORICO_URL = 'https://www.loteriaypiramides.com/costa-rica/nuevos-tiempos/historico';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';

@@ -4,9 +4,9 @@ const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 const fetch = require('node-fetch');
 
-const { parseHistoricoHtml } = require('./parseHistorico');
-const { parseHot30Cold30, parseNuevosTiemposHoy } = require('./parseYelu');
-const { computeStats } = require('./stats');
+const { parseHistoricoHtml } = require('../automation/lib/parseHistorico');
+const { parseHot30Cold30, parseNuevosTiemposHoy } = require('../automation/lib/parseYelu');
+const { computeStats } = require('../automation/lib/stats');
 
 admin.initializeApp();
 const db = admin.firestore();
