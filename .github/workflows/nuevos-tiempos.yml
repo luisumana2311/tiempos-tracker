@@ -1,0 +1,54 @@
+name: Nuevos Tiempos Tracker
+
+on:
+  schedule:
+    # Costa Rica es UTC-6 todo el año (sin horario de verano).
+    - cron: '41 14 * * *'   # 8:41am CR -> capturar predicciones del dia
+    - cron: '35 2 * * *'    # 8:35pm CR (dia anterior en UTC) -> calificar predicciones
+    - cron: '12 3 * * *'    # 9:12pm CR (dia anterior en UTC) -> actualizar sorteos
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Que tarea correr manualmente'
+        required: true
+        default: 'update-draws'
+        type: choice
+        options: [update-draws, capture-predictions, score-predictions]
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias
+        working-directory: automation
+        run: npm install
+
+      # github.event.schedule trae el cron EXACTO que disparo esta corrida,
+      # asi que no dependemos de la hora actual (que puede llegar unos
+      # minutos tarde) para saber que tarea toca.
+      - name: Capturar predicciones del dia
+        if: github.event.schedule == '41 14 * * *' || github.event.inputs.job == 'capture-predictions'
+        working-directory: automation
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node run-capture-predictions.js
+
+      - name: Calificar predicciones pendientes
+        if: github.event.schedule == '35 2 * * *' || github.event.inputs.job == 'score-predictions'
+        working-directory: automation
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node run-score-predictions.js
+
+      - name: Actualizar sorteos y estadisticas
+        if: github.event.schedule == '12 3 * * *' || github.event.inputs.job == 'update-draws'
+        working-directory: automation
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node run-update-draws.js

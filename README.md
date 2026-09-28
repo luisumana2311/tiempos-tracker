@@ -11,96 +11,128 @@ Sistema web real (no vive dentro de Claude) que:
    y lleva el historial de aciertos de cada fuente, contra lo que el azar
    explicaria por si solo.
 
-Todo corre solo, en la nube de Firebase, sin depender de tu computadora.
+Todo corre solo, sin depender de tu computadora, y sin costo.
 
 ## Arquitectura
 
-- **Cloud Functions** (`functions/`): 3 funciones programadas (`onSchedule`)
-  - `updateDraws` — 9:12pm hora CR
-  - `capturePredictions` — 8:41am hora CR
-  - `scorePredictions` — 8:35pm hora CR
+- **GitHub Actions** (`.github/workflows/nuevos-tiempos.yml`): corre los 3
+  scripts de `automation/` en un cron programado (gratis, sin tarjeta —
+  ver nota de "por que no Cloud Functions" abajo).
 - **Firestore**: base de datos (`draws`, `predictions`, `stats/latest`,
-  `predictions_summary/latest`)
+  `predictions_summary/latest`) — plan Spark (gratis).
 - **Firebase Hosting** (`public/`): las 2 paginas del dashboard, que leen
-  Firestore en vivo (no hay que "republicar" nada, se actualizan solas).
+  Firestore en vivo (no hay que "republicar" nada, se actualizan solas) —
+  plan Spark (gratis).
+- `functions/` queda como referencia/alternativa futura, pero **no se usa
+  ahora mismo** (ver nota abajo).
+
+### Por que GitHub Actions y no Cloud Functions
+
+Cloud Functions (incluso el uso minimo) exige que el proyecto de Firebase
+este en el plan **Blaze**, que pide asociar una tarjeta. Para evitar eso,
+la automatizacion diaria corre en GitHub Actions en su lugar, que es
+gratis y no pide tarjeta. El codigo de logica (parsear las paginas,
+calcular estadisticas) es el mismo en ambos casos — esta compartido en
+`functions/parseHistorico.js`, `functions/parseYelu.js`, `functions/stats.js`
+y `functions/chisquare.js`, y `automation/` solo lo reutiliza. Si en algun
+momento queres pasarte a Blaze, `functions/index.js` ya esta listo para
+desplegarse tal cual.
 
 ## Pasos que tienes que hacer tu (una sola vez)
 
-Yo no puedo crear el proyecto de Firebase, activar la facturacion ni hacer
-login con tu cuenta de Google — eso solo lo puedes hacer tu.
+### 1. El proyecto de Firebase ya existe
 
-### 1. Crear el proyecto en Firebase
+Ya creaste `nuevos-tiempos-tracker` en Firebase Console y esta en plan
+**Spark** (gratis) — no hace falta Blaze para nada de esto.
 
-1. Entra a https://console.firebase.google.com
-2. "Agregar proyecto" → nombralo como quieras (ej. `nuevos-tiempos-tracker`)
-3. Dentro del proyecto, activa el plan **Blaze** (pago por uso). Es
-   obligatorio para usar Cloud Functions programadas — pero con este
-   volumen de uso (3 funciones que corren una vez al dia) el costo mensual
-   deberia ser $0 o centavos, muy por debajo de la capa gratuita.
-4. Anota el **Project ID** que te asigna Firebase.
+### 2. Generar una clave de cuenta de servicio
 
-### 2. Editar `.firebaserc`
+Esto es lo que le da permiso a GitHub Actions (y a tu maquina, si queres
+correr los scripts localmente) para escribir en tu Firestore:
 
-Reemplaza `REEMPLAZA-CON-TU-PROJECT-ID` en el archivo `.firebaserc` por el
-Project ID real.
+1. Firebase Console → ⚙️ Configuracion del proyecto → pestaña
+   **Cuentas de servicio**.
+2. Boton **"Generar nueva clave privada"** → se descarga un archivo
+   `.json`. Guardalo, por ejemplo, en `scripts/serviceAccountKey.json`
+   (esta carpeta ya esta en `.gitignore`, no se sube a git jamas).
 
-### 3. Instalar Firebase CLI y hacer login
+### 3. Crear el repo en GitHub y subir el proyecto
 
-Desde una terminal, dentro de esta carpeta (`nuevos-tiempos-tracker`):
+```
+git remote add origin https://github.com/TU-USUARIO/nuevos-tiempos-tracker.git
+git branch -M main
+git push -u origin main
+```
+
+(Si preferis, tambien podes crear el repo primero en github.com y despues
+conectar el remoto — el orden no importa.)
+
+### 4. Agregar el secret en GitHub
+
+En el repo de GitHub → **Settings → Secrets and variables → Actions →
+New repository secret**:
+
+- **Name**: `FIREBASE_SERVICE_ACCOUNT`
+- **Value**: pega el contenido completo del archivo `.json` que descargaste
+  en el paso 2 (abrilo con un editor de texto y copia todo, tal cual, con
+  las llaves `{ }` incluidas).
+
+Con eso, el workflow `.github/workflows/nuevos-tiempos.yml` ya puede
+escribir en tu Firestore cuando corra.
+
+### 5. Activar el workflow
+
+Con el push del paso 3, GitHub ya deberia detectar el archivo
+`.github/workflows/nuevos-tiempos.yml` solo. Anda a la pestaña **Actions**
+de tu repo — si te pide habilitarlo, aceptalo. Los 3 horarios programados
+(cron) van a correr solos desde ese momento.
+
+Para probarlo ya, sin esperar al horario: pestaña **Actions** → selecciona
+el workflow "Nuevos Tiempos Tracker" → **Run workflow** → elegi que tarea
+correr (`update-draws`, `capture-predictions` o `score-predictions`) →
+**Run workflow**. En un minuto deberias ver el resultado en los logs.
+
+### 6. Cargar el historico que ya recolectamos (recomendado)
+
+Ya tenemos ~3293 sorteos historicos (2023-08-17 a hoy) y el primer registro
+de predicciones, guardados en `seed/data.csv` y `seed/predictions_log.csv`.
+Para no esperar meses a que el workflow vuelva a acumular ese historial
+desde cero, corre esto una vez, desde tu maquina:
+
+```
+cd scripts
+npm install
+set GOOGLE_APPLICATION_CREDENTIALS=serviceAccountKey.json
+node seed.js
+```
+
+(En Windows con PowerShell: `$env:GOOGLE_APPLICATION_CREDENTIALS="serviceAccountKey.json"`
+antes del `node seed.js`. En Mac/Linux:
+`GOOGLE_APPLICATION_CREDENTIALS=serviceAccountKey.json node seed.js`.)
+
+### 7. Publicar las paginas (Hosting)
+
+Esto si necesita el Firebase CLI, pero **no necesita Blaze**, es parte del
+plan gratis:
 
 ```
 npm install -g firebase-tools
 firebase login
 ```
 
-Esto abre tu navegador para que inicies sesion con la cuenta de Google
-dueña del proyecto.
-
-### 4. Instalar dependencias
+Editar `.firebaserc` y poner tu Project ID real en vez de
+`REEMPLAZA-CON-TU-PROJECT-ID`, y despues:
 
 ```
-cd functions
-npm install
-cd ..
+firebase deploy --only hosting,firestore:rules
 ```
 
-### 5. Cargar el historico que ya recolectamos (opcional, recomendado)
-
-Ya tenemos ~3293 sorteos historicos (2023-08-17 a hoy) y el primer registro
-de predicciones, guardados en `seed/data.csv` y `seed/predictions_log.csv`.
-Para no esperar meses a que las funciones programadas vuelvan a acumular
-ese historial desde cero:
-
-```
-gcloud auth application-default login
-cd scripts
-npm install
-node seed.js
-cd ..
-```
-
-(Si no tienes `gcloud` instalado, tambien puedes generar una service
-account key desde Firebase Console → Configuracion del proyecto → Cuentas
-de servicio → "Generar nueva clave privada", guardarla como
-`scripts/serviceAccountKey.json`, y correr en su lugar:
-`set GOOGLE_APPLICATION_CREDENTIALS=serviceAccountKey.json && node seed.js`
-en Windows, o `GOOGLE_APPLICATION_CREDENTIALS=serviceAccountKey.json node seed.js`
-en Mac/Linux.)
-
-### 6. Desplegar
-
-```
-firebase deploy
-```
-
-Esto sube las 3 Cloud Functions, las reglas de Firestore, y las paginas de
-Hosting. Al final te da una URL publica (algo como
-`https://TU-PROYECTO.web.app`) — esa es tu pagina, ya funcionando, ya
-actualizandose sola cada dia.
+Al final te da una URL publica (algo como
+`https://TU-PROYECTO.web.app`) — esa es tu pagina.
 
 ## Como verificar que quedo funcionando
 
-- `firebase functions:log` — ver los logs de las 3 funciones.
+- Pestaña **Actions** del repo de GitHub — logs de cada corrida.
 - En Firebase Console → Firestore, deberias ver las colecciones `draws`,
   `predictions`, `stats`, `predictions_summary` con datos.
 - Entra a la URL de Hosting y deberias ver el dashboard con los datos

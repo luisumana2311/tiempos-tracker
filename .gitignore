@@ -3,3 +3,7 @@ functions/node_modules/
 .firebase/
 *.log
 firebase-debug.log
+scripts/serviceAccountKey.json
+automation/serviceAccountKey.json
+*.serviceAccountKey.json
+automation/node_modules/

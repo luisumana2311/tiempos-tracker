@@ -1,0 +1,10 @@
+{
+  "name": "nuevos-tiempos-automation",
+  "private": true,
+  "description": "Scripts que corren en GitHub Actions (plan gratis, sin Blaze) para automatizar Nuevos Tiempos Tracker",
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "node-fetch": "^2.7.0",
+    "cheerio": "^1.0.0"
+  }
+}
