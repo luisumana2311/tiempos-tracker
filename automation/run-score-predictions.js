@@ -2,9 +2,11 @@
 // pendientes contra los sorteos reales y recalcula el resumen de aciertos.
 
 const { db } = require('./firebaseAdmin');
+const { sendTelegram } = require('./telegram');
 
 async function main() {
   const firestore = db();
+  const justScored = [];
 
   const pendingSnap = await firestore.collection('predictions').where('hit', '==', null).get();
   if (pendingSnap.empty) {
@@ -31,6 +33,7 @@ async function main() {
         if (pred.numbers.includes(draw.numero)) { hit = true; matched = `${draw.slot} ${draw.numero}`; break; }
       }
       batch.update(doc.ref, { hit, matched_draw: matched });
+      justScored.push({ ...pred, hit, matched_draw: matched });
       scored++;
     }
     if (scored > 0) await batch.commit();
@@ -51,6 +54,24 @@ async function main() {
   }
   await firestore.collection('predictions_summary').doc('latest').set({ sources: summary, updated_at: new Date().toISOString() });
   console.log('scorePredictions: resumen recalculado.');
+
+  // --- Aviso por Telegram: que se califico hoy + rachas fuera de lo normal ---
+  if (justScored.length > 0) {
+    const lines = ['🔎 <b>Predicciones calificadas</b>'];
+    for (const p of justScored) {
+      lines.push(`${p.source} (${p.date}): ${p.hit ? `✅ acerto (${p.matched_draw})` : '❌ no acerto'}`);
+    }
+
+    const streakAlerts = [];
+    for (const [source, s] of Object.entries(summary)) {
+      if (s.days >= 20 && s.hit_rate_pct >= s.baseline_pct * 2) {
+        streakAlerts.push(`⚠️ ${source} lleva ${s.days} dias con ${s.hit_rate_pct}% de acierto, mas del doble de lo esperado por azar (${s.baseline_pct}%). Vale la pena revisarlo.`);
+      }
+    }
+    if (streakAlerts.length) lines.push('', ...streakAlerts);
+
+    await sendTelegram(lines.join('\n'));
+  }
 }
 
 main().then(() => process.exit(0)).catch(err => { console.error(err); process.exit(1); });
