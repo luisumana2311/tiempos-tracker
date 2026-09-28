@@ -16,6 +16,7 @@
     <a href="predicciones.html" class="active">Predicciones bajo la lupa</a>
   </nav>
 
+  <div id="draws-today"><p class="loading">Cargando sorteos de hoy...</p></div>
   <div id="today"><p class="loading">Cargando predicciones de hoy...</p></div>
   <div id="summary"></div>
   <div id="history"></div>
@@ -23,18 +24,22 @@
 
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
-import { getFirestore, doc, onSnapshot, collection, query, where, orderBy, limit, getDocs } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import { getFirestore, doc, onSnapshot, collection, query, where, orderBy, limit } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
 const firebaseConfig = await fetch('/__/firebase/init.json').then(r => r.json());
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+const SLOTS = ['Mediodia', 'Tarde', 'Noche'];
+
 function todayCR() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Costa_Rica', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 
-function chips(numbers) {
-  return numbers.map(n => `<span class="num-chip">${n}</span>`).join('');
+function chips(numbers, matchedNum) {
+  return numbers.map(n =>
+    `<span class="num-chip${n === matchedNum ? ' match' : ''}">${n}</span>`
+  ).join('');
 }
 
 function pillFor(hit) {
@@ -42,28 +47,61 @@ function pillFor(hit) {
   return hit ? '<span class="pill hit">acerto</span>' : '<span class="pill miss">no acerto</span>';
 }
 
-async function renderToday() {
-  const date = todayCR();
-  const q = query(collection(db, 'predictions'), where('date', '==', date));
-  const snap = await getDocs(q);
+// El numero ganador que aparece dentro de matched_draw, ej. "Tarde 62" -> "62"
+function matchedNumberFrom(matchedDraw) {
+  if (!matchedDraw) return null;
+  const m = matchedDraw.match(/(\d{1,2})\s*$/);
+  return m ? m[1].padStart(2, '0') : null;
+}
+
+// --- Sorteos de hoy: se actualiza solo en vivo a medida que van saliendo ---
+const dateToday = todayCR();
+onSnapshot(query(collection(db, 'draws'), where('date', '==', dateToday)), (snap) => {
+  const el = document.getElementById('draws-today');
+  const bySlot = {};
+  snap.docs.forEach(d => { const r = d.data(); bySlot[r.slot] = r; });
+
+  el.innerHTML = `
+    <div class="card">
+      <h2>Sorteos de hoy (${dateToday})</h2>
+      <div class="grid">
+        ${SLOTS.map(slot => {
+          const r = bySlot[slot];
+          return `
+            <div class="stat">
+              <div class="label">${slot}</div>
+              <div class="value ${r ? '' : ''}">${r ? r.numero + (r.reventado ? ' 🔴' : '') : '—'}</div>
+              <p class="note" style="margin-top:6px;">${r ? 'ya salio' : 'aun no sale'}</p>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+});
+
+// --- Predicciones de hoy: en vivo, para ver el cambio de "pendiente" a "acerto/no acerto" sin recargar ---
+onSnapshot(query(collection(db, 'predictions'), where('date', '==', dateToday)), (snap) => {
   const el = document.getElementById('today');
   if (snap.empty) {
-    el.innerHTML = '<div class="card"><h2>Hoy</h2><p class="note">Aun no se ha capturado la prediccion de hoy (llega en la manana, hora Costa Rica).</p></div>';
+    el.innerHTML = '<div class="card"><h2>Predicciones de hoy</h2><p class="note">Aun no se ha capturado la prediccion de hoy (llega en la manana, hora Costa Rica).</p></div>';
     return;
   }
   const rows = snap.docs.map(d => d.data());
   el.innerHTML = `
     <div class="card">
-      <h2>Hoy (${date})</h2>
-      ${rows.map(r => `
+      <h2>Predicciones de hoy</h2>
+      ${rows.map(r => {
+        const matchedNum = matchedNumberFrom(r.matched_draw);
+        return `
         <div style="margin-bottom:14px;">
-          <p class="note" style="margin-bottom:6px;"><strong>${r.kind}</strong> · baseline por azar: ${r.baseline_pct}% &nbsp; ${pillFor(r.hit)}</p>
-          <div class="numbers-list">${chips(r.numbers)}</div>
+          <p class="note" style="margin-bottom:6px;"><strong>${r.kind}</strong> · baseline por azar: ${r.baseline_pct}% &nbsp; ${pillFor(r.hit)}${matchedNum ? ` <span class="note" style="display:inline">(coincidio con ${r.matched_draw})</span>` : ''}</p>
+          <div class="numbers-list">${chips(r.numbers, matchedNum)}</div>
         </div>
-      `).join('')}
+      `;}).join('')}
     </div>
   `;
-}
+});
 
 onSnapshot(doc(db, 'predictions_summary', 'latest'), (snap) => {
   const el = document.getElementById('summary');
@@ -81,7 +119,7 @@ onSnapshot(doc(db, 'predictions_summary', 'latest'), (snap) => {
               <td>${source}</td>
               <td>${v.kind}</td>
               <td class="mono">${v.days}</td>
-              <td class="mono ${v.hit_rate_pct >= v.baseline_pct ? '' : ''}">${v.hit_rate_pct}%</td>
+              <td class="mono">${v.hit_rate_pct}%</td>
               <td class="mono">${v.baseline_pct}%</td>
             </tr>
           `).join('')}
@@ -92,9 +130,7 @@ onSnapshot(doc(db, 'predictions_summary', 'latest'), (snap) => {
   `;
 });
 
-async function renderHistory() {
-  const q = query(collection(db, 'predictions'), orderBy('date', 'desc'), limit(30));
-  const snap = await getDocs(q);
+onSnapshot(query(collection(db, 'predictions'), orderBy('date', 'desc'), limit(30)), (snap) => {
   const el = document.getElementById('history');
   if (snap.empty) { el.innerHTML = ''; return; }
   const rows = snap.docs.map(d => d.data());
@@ -111,10 +147,7 @@ async function renderHistory() {
       </table>
     </div>
   `;
-}
-
-renderToday();
-renderHistory();
+});
 </script>
 </body>
 </html>

@@ -129,6 +129,15 @@ nav.tabs a.active {
   border-radius: 9px; padding: 5px 9px; min-width: 32px; text-align: center;
 }
 .num-chip.cold { background: var(--cyan-soft); color: var(--cyan); }
+.num-chip.match {
+  background: var(--rose); color: #fff; border-color: var(--rose);
+  box-shadow: 0 0 0 3px var(--rose-soft);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 3px var(--rose-soft); }
+  50% { box-shadow: 0 0 0 6px var(--rose-soft); }
+}
 
 p.note { font-size: 13.5px; color: var(--ink-soft); line-height: 1.6; margin: 8px 0 0; }
 .updated {
