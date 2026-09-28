@@ -72,7 +72,7 @@ async function seedPredictions() {
 }
 
 async function computeInitialStats() {
-  const { computeStats } = require('../functions/stats');
+  const { computeStats } = require('../automation/lib/stats');
   const snap = await db.collection('draws').get();
   const allDraws = snap.docs.map(d => d.data());
   const stats = computeStats(allDraws);

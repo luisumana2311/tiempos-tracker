@@ -7,3 +7,4 @@ scripts/serviceAccountKey.json
 automation/serviceAccountKey.json
 *.serviceAccountKey.json
 automation/node_modules/
+*firebase-adminsdk*.json
