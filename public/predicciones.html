@@ -38,16 +38,23 @@ function todayCR() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Costa_Rica', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 
-function chips(numbers, matchedNum) {
-  return numbers.map(n =>
-    `<span class="num-chip${n === matchedNum ? ' match' : ''}">${n}</span>`
-  ).join('');
+// shortlistSet (opcional): numeros que cumplen nuestro propio criterio
+// ("atrasado" + predicho por alguna fuente) -- se marcan con ⭐ ademas
+// del color, para no depender solo del color para distinguirlos.
+function chips(numbers, matchedNum, shortlistSet) {
+  return numbers.map(n => {
+    const isMatch = n === matchedNum;
+    const isShort = !isMatch && shortlistSet && shortlistSet.has(n);
+    const cls = isMatch ? ' match' : (isShort ? ' shortlist' : '');
+    const label = isShort ? `⭐${n}` : n;
+    return `<span class="num-chip${cls}"${isShort ? ` title="tambien esta en Numeros a seguir hoy"` : ''}>${label}</span>`;
+  }).join('');
 }
 
 // Igual que chips(), pero si la lista es larga (ej. los 30 calientes) la
 // esconde detras de un <details> para no llenar la pantalla de numeros.
-function chipsMaybeCollapsed(numbers, matchedNum) {
-  const body = `<div class="numbers-list">${chips(numbers, matchedNum)}</div>`;
+function chipsMaybeCollapsed(numbers, matchedNum, shortlistSet) {
+  const body = `<div class="numbers-list">${chips(numbers, matchedNum, shortlistSet)}</div>`;
   if (numbers.length <= MAX_CHIPS_INLINE) return body;
   return `<details><summary>Ver los ${numbers.length} numeros</summary>${body}</details>`;
 }
@@ -73,6 +80,27 @@ function matchedNumberFrom(matchedDraw) {
 
 let latestStats = null;
 let latestPredictions = null;
+
+// Numeros que cumplen las dos señales (atrasado en nuestro historico +
+// predicho hoy por alguna fuente externa). Se usa tanto para la tarjeta
+// "Numeros a seguir hoy" como para marcar con ⭐ esos mismos numeros
+// dentro de las listas crudas de "Predicciones de hoy".
+function computeShortlist() {
+  if (!latestStats || !Array.isArray(latestStats.overdue) || !latestStats.overdue.length) return [];
+  const overdueMap = new Map(latestStats.overdue.map(o => [String(o.num).padStart(2, '0'), o.draws_since]));
+
+  const predictedSet = new Set();
+  if (latestPredictions && latestPredictions.length) {
+    for (const r of latestPredictions) {
+      for (const raw of r.numbers) predictedSet.add(String(raw).padStart(2, '0'));
+    }
+  }
+
+  return [...overdueMap.entries()]
+    .filter(([num]) => predictedSet.has(num))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+}
 
 // --- Sorteos de hoy: se actualiza solo en vivo a medida que van saliendo ---
 const dateToday = todayCR();
@@ -100,60 +128,58 @@ onSnapshot(query(collection(db, 'draws'), where('date', '==', dateToday)), (snap
   `;
 });
 
-// --- Predicciones de hoy: en vivo, para ver el cambio de "pendiente" a "acerto/no acerto" sin recargar ---
+// --- Predicciones de hoy + Lista corta: se re-renderizan juntas cada vez
+// que cambia cualquiera de las dos fuentes (predictions o stats/latest),
+// para que las ⭐ en las listas crudas y la tarjeta resumen nunca queden
+// desincronizadas entre si.
 onSnapshot(query(collection(db, 'predictions'), where('date', '==', dateToday)), (snap) => {
-  const el = document.getElementById('today');
-  if (snap.empty) {
-    el.innerHTML = '<div class="card"><h2>Predicciones de hoy</h2><p class="note">Aun no se ha capturado la prediccion de hoy (llega en la manana, hora Costa Rica).</p></div>';
-  } else {
-    const rows = snap.docs.map(d => d.data());
-    el.innerHTML = `
-      <div class="card">
-        <h2>Predicciones de hoy</h2>
-        ${rows.map(r => {
-          const matchedNum = matchedNumberFrom(r.matched_draw);
-          return `
-          <div style="margin-bottom:14px;">
-            <p class="note" style="margin-bottom:6px;"><strong>${r.kind}</strong> · baseline por azar: ${r.baseline_pct}% &nbsp; ${pillFor(r.hit)}${matchedNum ? ` <span class="note" style="display:inline">(coincidio con ${r.matched_draw})</span>` : ''}</p>
-            ${chipsMaybeCollapsed(r.numbers, matchedNum)}
-          </div>
-        `;}).join('')}
-      </div>
-    `;
-  }
   latestPredictions = snap.empty ? [] : snap.docs.map(d => d.data());
-  renderShortlist();
+  renderTodayAndShortlist();
 });
 
-// --- Lista corta combinada: numeros que estan a la vez "atrasados" en
+onSnapshot(doc(db, 'stats', 'latest'), (snap) => {
+  latestStats = snap.exists() ? snap.data() : null;
+  renderTodayAndShortlist();
+});
+
+function renderTodayAndShortlist() {
+  renderToday();
+  renderShortlist();
+}
+
+function renderToday() {
+  const el = document.getElementById('today');
+  if (latestPredictions === null) return; // aun no llega el primer snapshot
+  if (latestPredictions.length === 0) {
+    el.innerHTML = '<div class="card"><h2>Predicciones de hoy</h2><p class="note">Aun no se ha capturado la prediccion de hoy (llega en la manana, hora Costa Rica).</p></div>';
+    return;
+  }
+  const shortlistSet = new Set(computeShortlist().map(([num]) => num));
+  el.innerHTML = `
+    <div class="card">
+      <h2>Predicciones de hoy</h2>
+      ${shortlistSet.size ? `<p class="note" style="margin-bottom:10px;">⭐ = tambien esta atrasado en nuestro historico (ver "Numeros a seguir hoy" abajo).</p>` : ''}
+      ${latestPredictions.map(r => {
+        const matchedNum = matchedNumberFrom(r.matched_draw);
+        return `
+        <div style="margin-bottom:14px;">
+          <p class="note" style="margin-bottom:6px;"><strong>${r.kind}</strong> · baseline por azar: ${r.baseline_pct}% &nbsp; ${pillFor(r.hit)}${matchedNum ? ` <span class="note" style="display:inline">(coincidio con ${r.matched_draw})</span>` : ''}</p>
+          ${chipsMaybeCollapsed(r.numbers, matchedNum, shortlistSet)}
+        </div>
+      `;}).join('')}
+    </div>
+  `;
+}
+
+// --- Numeros a seguir hoy: numeros que estan a la vez "atrasados" en
 // nuestro propio historico Y predichos hoy por alguna fuente externa.
 // Es la primera tarjeta despues de los sorteos de hoy porque es el
 // resumen mas accionable -- el resto de la pagina es detalle/auditoria.
-onSnapshot(doc(db, 'stats', 'latest'), (snap) => {
-  latestStats = snap.exists() ? snap.data() : null;
-  renderShortlist();
-});
-
 function renderShortlist() {
   const el = document.getElementById('shortlist');
-  if (!latestStats || !Array.isArray(latestStats.overdue) || !latestStats.overdue.length) {
-    el.innerHTML = '';
-    return;
-  }
+  if (!latestStats) { el.innerHTML = ''; return; }
 
-  const overdueMap = new Map(latestStats.overdue.map(o => [String(o.num).padStart(2, '0'), o.draws_since]));
-
-  const predictedSet = new Set();
-  if (latestPredictions && latestPredictions.length) {
-    for (const r of latestPredictions) {
-      for (const raw of r.numbers) predictedSet.add(String(raw).padStart(2, '0'));
-    }
-  }
-
-  const ranked = [...overdueMap.entries()]
-    .filter(([num]) => predictedSet.has(num))
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
+  const ranked = computeShortlist();
 
   if (ranked.length === 0) {
     el.innerHTML = `
@@ -168,9 +194,9 @@ function renderShortlist() {
   el.innerHTML = `
     <div class="card">
       <h2>Numeros a seguir hoy</h2>
-      <p class="note">Cumplen las dos cosas: llevan mas sorteos sin salir en nuestro historico, y ademas yelu.cr los predice hoy. No cambia la probabilidad real de cada numero -- es solo para no revisar 30 numeros sueltos.</p>
+      <p class="note">⭐ Cumplen las dos cosas: llevan mas sorteos sin salir en nuestro historico, y ademas yelu.cr los predice hoy. Estas mismas ⭐ aparecen marcadas en "Predicciones de hoy" abajo. No cambia la probabilidad real de cada numero -- es solo para no revisar 30 numeros sueltos.</p>
       <div class="numbers-list">
-        ${ranked.map(([num, draws_since]) => `<span class="num-chip" title="atrasado: ${draws_since} sorteos sin salir">${num}</span>`).join('')}
+        ${ranked.map(([num, draws_since]) => `<span class="num-chip shortlist" title="atrasado: ${draws_since} sorteos sin salir">⭐${num}</span>`).join('')}
       </div>
     </div>
   `;

@@ -188,3 +188,9 @@ td .num-chip { font-size: 12px; padding: 3px 7px; min-width: 26px; }
 .methodology summary::before { content: '▸ '; color: var(--ink-soft); }
 .methodology[open] summary::before { content: '▾ '; }
 .methodology summary ~ p.note { margin-top: 12px; }
+
+.num-chip.shortlist {
+  background: var(--violet); color: #fff; border-color: var(--violet);
+  font-weight: 700;
+  box-shadow: 0 0 0 2px var(--violet-soft);
+}
