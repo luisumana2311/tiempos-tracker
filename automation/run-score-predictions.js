@@ -1,21 +1,35 @@
 // Equivalente standalone de scorePredictions: compara las predicciones
-// pendientes contra los sorteos reales y recalcula el resumen de aciertos.
+// contra los sorteos reales y recalcula el resumen de aciertos.
+//
+// Revisa TODAS las predicciones (no solo las pendientes), normalizando
+// numeros con padStart(2,'0') antes de comparar. Esto es un "self-heal":
+// si algun capture viejo guardo numeros sin cero a la izquierda (bug
+// detectado el 2026-09-29 -- yelu_hot7 del 2026-09-28 se guardo como "9"
+// en vez de "09", y por eso "9" nunca calzaba contra el "09" del sorteo,
+// marcando "no acerto" cuando si habia acertado), esta pasada lo corrige
+// solo, sin tener que editar Firestore a mano. El volumen es bajo (3
+// predicciones por dia), asi que revisar todo cada vez es barato.
 
 const { db } = require('./firebaseAdmin');
 const { sendTelegram } = require('./telegram');
 
+function norm(numStr) {
+  return String(numStr).padStart(2, '0');
+}
+
 async function main() {
   const firestore = db();
   const justScored = [];
+  const corrected = [];
 
-  const pendingSnap = await firestore.collection('predictions').where('hit', '==', null).get();
-  if (pendingSnap.empty) {
-    console.log('scorePredictions: no hay predicciones pendientes de calificar.');
+  const allPredsSnap = await firestore.collection('predictions').get();
+  if (allPredsSnap.empty) {
+    console.log('scorePredictions: no hay predicciones guardadas todavia.');
   } else {
     const drawsByDate = {};
-    for (const doc of pendingSnap.docs) {
+    for (const doc of allPredsSnap.docs) {
       const { date } = doc.data();
-      if (!drawsByDate[date]) {
+      if (!(date in drawsByDate)) {
         const s = await firestore.collection('draws').where('date', '==', date).get();
         drawsByDate[date] = s.docs.map(d => d.data());
       }
@@ -23,21 +37,34 @@ async function main() {
 
     const batch = firestore.batch();
     let scored = 0;
-    for (const doc of pendingSnap.docs) {
+    for (const doc of allPredsSnap.docs) {
       const pred = doc.data();
       const draws = drawsByDate[pred.date] || [];
-      if (draws.length === 0) continue;
+      if (draws.length === 0) continue; // todavia no hay sorteos ese dia, se deja pendiente
 
+      const normalizedPredNums = (pred.numbers || []).map(norm);
       let hit = false, matched = null;
       for (const draw of draws) {
-        if (pred.numbers.includes(draw.numero)) { hit = true; matched = `${draw.slot} ${draw.numero}`; break; }
+        if (normalizedPredNums.includes(norm(draw.numero))) { hit = true; matched = `${draw.slot} ${draw.numero}`; break; }
       }
+
+      const wasPending = pred.hit === null || pred.hit === undefined;
+      const changed = pred.hit !== hit || pred.matched_draw !== matched;
+      if (!changed) continue;
+
       batch.update(doc.ref, { hit, matched_draw: matched });
-      justScored.push({ ...pred, hit, matched_draw: matched });
       scored++;
+      if (wasPending) {
+        justScored.push({ ...pred, hit, matched_draw: matched });
+      } else {
+        corrected.push({ ...pred, hit_before: pred.hit, hit, matched_draw: matched });
+      }
     }
     if (scored > 0) await batch.commit();
-    console.log(`scorePredictions: ${scored} predicciones calificadas.`);
+    console.log(`scorePredictions: ${justScored.length} predicciones nuevas calificadas, ${corrected.length} corregidas (calificacion previa estaba mal).`);
+    for (const c of corrected) {
+      console.log(`  corregido: ${c.source} (${c.date}) paso de hit=${c.hit_before} a hit=${c.hit}`);
+    }
   }
 
   const allSnap = await firestore.collection('predictions').where('hit', '!=', null).get();
@@ -55,7 +82,8 @@ async function main() {
   await firestore.collection('predictions_summary').doc('latest').set({ sources: summary, updated_at: new Date().toISOString() });
   console.log('scorePredictions: resumen recalculado.');
 
-  // --- Aviso por Telegram: que se califico hoy + rachas fuera de lo normal ---
+  // --- Aviso por Telegram: solo por calificaciones NUEVAS (no por
+  // correcciones de dias viejos, para no generar ruido con historia). ---
   if (justScored.length > 0) {
     const lines = ['🔎 <b>Predicciones calificadas</b>'];
     for (const p of justScored) {
