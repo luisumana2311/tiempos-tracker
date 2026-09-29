@@ -126,28 +126,33 @@ function renderShortlist() {
   }
 
   const overdueMap = new Map(latestStats.overdue.map(o => [String(o.num).padStart(2, '0'), o.draws_since]));
-  const scores = new Map();
-  const bump = (num, amount) => scores.set(num, (scores.get(num) || 0) + amount);
 
-  for (const num of overdueMap.keys()) bump(num, 1);
-
+  // Union de numeros predichos por CUALQUIER fuente externa (yelu_lucky,
+  // yelu_hot7, yelu_hot30 -- son 3 listas del MISMO sitio, asi que cuentan
+  // como una sola señal "externa", no como señales independientes entre si).
+  const predictedSet = new Set();
   if (latestPredictions && latestPredictions.length) {
     for (const r of latestPredictions) {
-      const weight = r.source === 'yelu_hot30' ? 0.5 : 1;
-      for (const raw of r.numbers) bump(String(raw).padStart(2, '0'), weight);
+      for (const raw of r.numbers) predictedSet.add(String(raw).padStart(2, '0'));
     }
   }
 
-  const ranked = [...scores.entries()]
-    .filter(([, score]) => score >= 1.5) // al menos dos señales de acuerdo (atrasado + alguna prediccion externa)
-    .sort((a, b) => b[1] - a[1] || (overdueMap.get(b[0]) || 0) - (overdueMap.get(a[0]) || 0))
+  // Solo entra a la lista corta un numero que este REALMENTE atrasado en
+  // nuestro propio historico Y que ademas alguna fuente externa lo
+  // prediga hoy -- dos señales de origen distinto, no dos listas del
+  // mismo sitio sumando puntos entre si (eso fue justo el bug: "09"
+  // salia con solo estar en yelu_hot7 + yelu_hot30, sin estar atrasado
+  // para nada, porque ambas listas son del mismo sitio).
+  const ranked = [...overdueMap.entries()]
+    .filter(([num]) => predictedSet.has(num))
+    .sort((a, b) => b[1] - a[1])
     .slice(0, 10);
 
   if (ranked.length === 0) {
     el.innerHTML = `
       <div class="card">
         <h2>Lista corta combinada</h2>
-        <p class="note">Hoy ningun numero coincide entre "atrasados" y las predicciones externas capturadas. Sin cruce, no hay lista corta que mostrar.</p>
+        <p class="note">Hoy ningun numero esta a la vez "atrasado" en nuestro historico y predicho por yelu.cr. Sin cruce, no hay lista corta que mostrar.</p>
       </div>
     `;
     return;
@@ -156,13 +161,9 @@ function renderShortlist() {
   el.innerHTML = `
     <div class="card">
       <h2>Lista corta combinada</h2>
-      <p class="note">Cruce entre numeros "atrasados" (no salen hace mas sorteos en nuestro propio historico) y los numeros que las fuentes externas dicen para hoy. Reduce el ruido de mirar 30 numeros sueltos -- no cambia la probabilidad real de cada numero.</p>
+      <p class="note">Solo numeros que cumplen las DOS cosas: llevan mas sorteos sin salir en nuestro propio historico, Y ademas alguna fuente externa (yelu.cr) los predice para hoy. Reduce el ruido de mirar 30 numeros sueltos -- no cambia la probabilidad real de cada numero.</p>
       <div class="numbers-list">
-        ${ranked.map(([num, score]) => {
-          const atraso = overdueMap.get(num);
-          const title = atraso !== undefined ? `atrasado: ${atraso} sorteos sin salir` : 'solo predicho por fuente externa';
-          return `<span class="num-chip" title="${title}">${num}</span>`;
-        }).join('')}
+        ${ranked.map(([num, draws_since]) => `<span class="num-chip" title="atrasado: ${draws_since} sorteos sin salir">${num}</span>`).join('')}
       </div>
     </div>
   `;
