@@ -169,3 +169,22 @@ details .numbers-list { margin-top: 4px; }
 
 td .numbers-list { gap: 5px; }
 td .num-chip { font-size: 12px; padding: 3px 7px; min-width: 26px; }
+
+.verdict h2::before { display: none; }
+.verdict { border-width: 1px; }
+.verdict-ok { border-left: 4px solid var(--cyan); background: linear-gradient(180deg, var(--cyan-soft) 0%, var(--panel) 40%); }
+.verdict-warn { border-left: 4px solid var(--rose); background: linear-gradient(180deg, var(--rose-soft) 0%, var(--panel) 40%); }
+
+.chart-legend { display: flex; gap: 18px; margin-top: 10px; flex-wrap: wrap; }
+.chart-legend span { font-size: 12px; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+.methodology { padding: 16px 22px; }
+.methodology summary {
+  font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 16px; color: var(--ink);
+  list-style: none; cursor: pointer; margin: 0;
+}
+.methodology summary::-webkit-details-marker { display: none; }
+.methodology summary::before { content: '▸ '; color: var(--ink-soft); }
+.methodology[open] summary::before { content: '▾ '; }
+.methodology summary ~ p.note { margin-top: 12px; }

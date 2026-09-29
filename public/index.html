@@ -35,13 +35,89 @@ const db = getFirestore(app);
 const content = document.getElementById('content');
 
 function pct(p) { return (p * 100).toFixed(2) + '%'; }
-function verdict(p) { return p > 0.05 ? 'ok' : 'warn'; }
-function verdictText(p) { return p > 0.05 ? 'sin desviacion significativa' : 'posible desviacion (revisar)'; }
+function isOk(p) { return p > 0.05; }
+function verdict(p) { return isOk(p) ? 'ok' : 'warn'; }
+function verdictIcon(p) { return isOk(p) ? '✅' : '⚠️'; }
+function verdictText(p) { return isOk(p) ? 'sin desviacion significativa' : 'posible desviacion (revisar)'; }
 
 function numChips(items, cls) {
   return items.map(({ num, count }) =>
     `<span class="num-chip ${cls}">${String(num).padStart(2,'0')} <span style="opacity:.6">(${count})</span></span>`
   ).join('');
+}
+
+// --- Veredicto general: junta todos los p-values en un solo semaforo,
+// para que no haya que leer 6 tarjetas distintas para saber "¿esta bien
+// o no?". El detalle de cada prueba sigue abajo para quien quiera verlo.
+function buildVerdictBanner(s) {
+  const checks = [
+    { label: 'distribucion de los 100 numeros', p: s.p_total },
+    { label: 'par / impar', p: s.p_eo },
+    { label: 'ultimo digito', p: s.p_last },
+    { label: 'primer digito', p: s.p_first },
+    ...Object.entries(s.slot_stats).map(([slot, v]) => ({ label: `horario ${slot}`, p: v.p })),
+  ];
+  const failing = checks.filter(c => !isOk(c.p));
+
+  if (failing.length === 0) {
+    return `
+      <div class="card verdict verdict-ok">
+        <h2>✅ Todo se comporta como esperariamos por puro azar</h2>
+        <p class="note">Las ${checks.length} pruebas estadisticas (distribucion completa, par/impar, digitos, horarios) no muestran ninguna desviacion significativa frente a lo que un sorteo aleatorio deberia dar. Esto no prueba que el sorteo sea justo -- ninguna prueba estadistica puede probar eso -- pero tampoco hay ninguna senal de que no lo sea.</p>
+      </div>
+    `;
+  }
+  return `
+    <div class="card verdict verdict-warn">
+      <h2>⚠️ ${failing.length} de ${checks.length} pruebas muestran una desviacion</h2>
+      <p class="note">Esto no es prueba de manipulacion -- con suficientes pruebas, es normal que alguna de un p-value bajo solo por azar (es el llamado "problema de comparaciones multiples"). Pero vale la pena vigilarlo: <strong>${failing.map(f => f.label).join(', ')}</strong>.</p>
+    </div>
+  `;
+}
+
+// --- Grafico de barras de los 100 numeros (00-99). Color divergente:
+// violeta = sale mas de lo esperado, celeste = sale menos, gris = cerca
+// del promedio. La altura de la barra es la frecuencia real.
+function buildFrequencyChart(freq, n) {
+  const expected = n / 100;
+  const maxFreq = Math.max(...freq, 1);
+  const w = 860, h = 170, padL = 34, padR = 6, padT = 10, padB = 22;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const barGap = 1.4;
+  const barW = plotW / 100 - barGap;
+  const y = (v) => padT + plotH - (v / maxFreq) * plotH;
+  const expectedY = y(expected);
+
+  const bars = freq.map((count, num) => {
+    const x = padL + num * (plotW / 100);
+    const barH = plotH - (y(count) - padT);
+    const dev = (count - expected) / expected; // desviacion relativa
+    let fill;
+    if (Math.abs(dev) < 0.12) fill = 'var(--ink-soft)';
+    else if (dev > 0) fill = dev > 0.30 ? 'var(--violet)' : 'var(--violet)';
+    else fill = dev < -0.30 ? 'var(--cyan)' : 'var(--cyan)';
+    const opacity = Math.abs(dev) < 0.12 ? 0.35 : (Math.abs(dev) > 0.30 ? 1 : 0.65);
+    return `<rect x="${x.toFixed(1)}" y="${y(count).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(barH, 0).toFixed(1)}" rx="1.5" fill="${fill}" opacity="${opacity}"><title>${String(num).padStart(2, '0')}: salio ${count} veces (esperado ~${expected.toFixed(1)})</title></rect>`;
+  }).join('');
+
+  const xLabels = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90].map(num => {
+    const x = padL + num * (plotW / 100);
+    return `<text x="${x.toFixed(1)}" y="${h - 4}" font-size="9" fill="var(--ink-soft)" font-family="JetBrains Mono, monospace">${String(num).padStart(2, '0')}</text>`;
+  }).join('');
+
+  return `
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%; height:auto; display:block;" role="img" aria-label="Frecuencia de cada numero del 00 al 99">
+      <line x1="${padL}" y1="${expectedY.toFixed(1)}" x2="${w - padR}" y2="${expectedY.toFixed(1)}" stroke="var(--line)" stroke-width="1" stroke-dasharray="3,3"/>
+      <text x="${padL}" y="${(expectedY - 4).toFixed(1)}" font-size="9.5" fill="var(--ink-soft)" font-family="JetBrains Mono, monospace">promedio esperado (${expected.toFixed(1)})</text>
+      ${bars}
+      ${xLabels}
+    </svg>
+    <div class="chart-legend">
+      <span><i class="dot" style="background:var(--violet)"></i> sale mas de lo esperado</span>
+      <span><i class="dot" style="background:var(--ink-soft)"></i> cerca del promedio</span>
+      <span><i class="dot" style="background:var(--cyan)"></i> sale menos de lo esperado</span>
+    </div>
+  `;
 }
 
 onSnapshot(doc(db, 'stats', 'latest'), (snap) => {
@@ -53,13 +129,17 @@ onSnapshot(doc(db, 'stats', 'latest'), (snap) => {
   content.innerHTML = `
     <p class="updated">Basado en ${s.n.toLocaleString('es-CR')} sorteos, del ${s.date_from} al ${s.date_to}. Ultima actualizacion: ${new Date(s.updated_at).toLocaleString('es-CR')}</p>
 
+    ${buildVerdictBanner(s)}
+
     <div class="card">
       <h2>Distribucion de los 100 numeros (00-99)</h2>
-      <div class="grid">
+      <p class="note" style="margin:0 0 14px;">Cuantas veces ha salido cada numero. Si el sorteo es justo, todas las barras deberian rondar la linea punteada -- con ${s.n.toLocaleString('es-CR')} sorteos y 100 numeros posibles, algo de diferencia entre el mas y el menos frecuente es normal solo por azar.</p>
+      ${buildFrequencyChart(s.freq, s.n)}
+      <div class="grid" style="margin-top:16px;">
         <div class="stat"><div class="label">Chi-cuadrado</div><div class="value">${s.chi2_total}</div></div>
         <div class="stat"><div class="label">p-value</div><div class="value ${verdict(s.p_total)}">${pct(s.p_total)}</div></div>
       </div>
-      <p class="note">${verdictText(s.p_total)}. Con 99 grados de libertad, un p-value bajo (&lt; 5%) indicaria que algunos numeros salen mas de lo que el azar explicaria.</p>
+      <p class="note">${verdictIcon(s.p_total)} ${verdictText(s.p_total)}. Un p-value bajo (&lt; 5%) indicaria que algunos numeros salen mas de lo que el azar explicaria.</p>
     </div>
 
     <div class="card">
@@ -69,20 +149,20 @@ onSnapshot(doc(db, 'stats', 'latest'), (snap) => {
         <div class="stat"><div class="label">Impares</div><div class="value">${s.odd.toLocaleString('es-CR')}</div></div>
         <div class="stat"><div class="label">p-value</div><div class="value ${verdict(s.p_eo)}">${pct(s.p_eo)}</div></div>
       </div>
-      <p class="note">${verdictText(s.p_eo)} frente al 50/50 esperado.</p>
+      <p class="note">${verdictIcon(s.p_eo)} ${verdictText(s.p_eo)} frente al 50/50 esperado.</p>
     </div>
 
     <div class="card">
       <h2>Por horario de sorteo</h2>
+      <p class="note" style="margin:0 0 14px;">Si un horario (Mediodia, Tarde o Noche) se comportara distinto a los demas, seria una pista de algo no aleatorio.</p>
       <table>
-        <thead><tr><th>Horario</th><th class="mono">n</th><th class="mono">chi2</th><th class="mono">p-value</th></tr></thead>
+        <thead><tr><th>Horario</th><th class="mono">n</th><th class="mono">chi2</th><th class="mono">p-value</th><th></th></tr></thead>
         <tbody>
           ${Object.entries(s.slot_stats).map(([slot, v]) => `
-            <tr><td>${slot}</td><td class="mono">${v.n}</td><td class="mono">${v.chi2}</td><td class="mono ${verdict(v.p)}">${pct(v.p)}</td></tr>
+            <tr><td>${slot}</td><td class="mono">${v.n}</td><td class="mono">${v.chi2}</td><td class="mono ${verdict(v.p)}">${pct(v.p)}</td><td>${verdictIcon(v.p)}</td></tr>
           `).join('')}
         </tbody>
       </table>
-      <p class="note">Si cada horario se comportara distinto a los demas, seria una pista de algo no aleatorio. No es el caso aqui.</p>
     </div>
 
     <div class="card">
@@ -90,6 +170,7 @@ onSnapshot(doc(db, 'stats', 'latest'), (snap) => {
       <div class="grid">
         <div class="stat"><div class="label">Tasa observada</div><div class="value">${pct(s.red_rate)}</div></div>
       </div>
+      <p class="note">Porcentaje de sorteos donde salio la bola "Reventado" (el bono extra). Se muestra como referencia, no se le aplica una prueba de aleatoriedad por separado.</p>
     </div>
 
     <div class="card">
@@ -98,11 +179,11 @@ onSnapshot(doc(db, 'stats', 'latest'), (snap) => {
       <div class="numbers-list">${numChips(s.hot, '')}</div>
       <p class="note" style="margin-top:14px;">Frio (bottom 8):</p>
       <div class="numbers-list">${numChips(s.cold, 'cold')}</div>
-      <p class="note" style="margin-top:14px;">Esta variacion es normal incluso en un sistema perfectamente aleatorio: con ${s.n.toLocaleString('es-CR')} sorteos y 100 numeros posibles, algo de diferencia entre el mas y el menos frecuente se espera solo por azar.</p>
+      <p class="note" style="margin-top:14px;">Esta variacion es normal incluso en un sistema perfectamente aleatorio -- no es una senal de que esos numeros vayan a salir mas o menos en el futuro. Cada sorteo es independiente del anterior.</p>
     </div>
 
-    <div class="card">
-      <h2>Metodologia</h2>
+    <details class="card methodology">
+      <summary>Metodologia</summary>
       <p class="note">
         Los datos se recolectan cada noche desde el historico publico de sorteos. Se aplican pruebas
         chi-cuadrado de bondad de ajuste (comparando la distribucion observada contra la uniforme
@@ -111,7 +192,7 @@ onSnapshot(doc(db, 'stats', 'latest'), (snap) => {
         Un p-value bajo no prueba que el sorteo este manipulado; solo senala una desviacion estadistica
         que ameritaria mas seguimiento.
       </p>
-    </div>
+    </details>
   `;
 });
 </script>
