@@ -17,8 +17,8 @@
   </nav>
 
   <div id="draws-today"><p class="loading">Cargando sorteos de hoy...</p></div>
-  <div id="today"><p class="loading">Cargando predicciones de hoy...</p></div>
   <div id="shortlist"></div>
+  <div id="today"><p class="loading">Cargando predicciones de hoy...</p></div>
   <div id="summary"></div>
   <div id="history"></div>
 </div>
@@ -32,6 +32,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 const SLOTS = ['Mediodia', 'Tarde', 'Noche'];
+const MAX_CHIPS_INLINE = 10; // listas mas largas que esto se muestran colapsadas
 
 function todayCR() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Costa_Rica', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -41,6 +42,21 @@ function chips(numbers, matchedNum) {
   return numbers.map(n =>
     `<span class="num-chip${n === matchedNum ? ' match' : ''}">${n}</span>`
   ).join('');
+}
+
+// Igual que chips(), pero si la lista es larga (ej. los 30 calientes) la
+// esconde detras de un <details> para no llenar la pantalla de numeros.
+function chipsMaybeCollapsed(numbers, matchedNum) {
+  const body = `<div class="numbers-list">${chips(numbers, matchedNum)}</div>`;
+  if (numbers.length <= MAX_CHIPS_INLINE) return body;
+  return `<details><summary>Ver los ${numbers.length} numeros</summary>${body}</details>`;
+}
+
+// Version compacta para filas de tabla: muestra unos pocos y resume el resto.
+function chipsCompactForRow(numbers, matchedNum) {
+  const shown = numbers.slice(0, MAX_CHIPS_INLINE);
+  const extra = numbers.length - shown.length;
+  return `<div class="numbers-list">${chips(shown, matchedNum)}${extra > 0 ? `<span class="note" style="display:inline;">+${extra} mas</span>` : ''}</div>`;
 }
 
 function pillFor(hit) {
@@ -74,7 +90,7 @@ onSnapshot(query(collection(db, 'draws'), where('date', '==', dateToday)), (snap
           return `
             <div class="stat">
               <div class="label">${slot}</div>
-              <div class="value ${r ? '' : ''}">${r ? r.numero + (r.reventado ? ' 🔴' : '') : '—'}</div>
+              <div class="value">${r ? r.numero + (r.reventado ? ' 🔴' : '') : '—'}</div>
               <p class="note" style="margin-top:6px;">${r ? 'ya salio' : 'aun no sale'}</p>
             </div>
           `;
@@ -99,7 +115,7 @@ onSnapshot(query(collection(db, 'predictions'), where('date', '==', dateToday)),
           return `
           <div style="margin-bottom:14px;">
             <p class="note" style="margin-bottom:6px;"><strong>${r.kind}</strong> · baseline por azar: ${r.baseline_pct}% &nbsp; ${pillFor(r.hit)}${matchedNum ? ` <span class="note" style="display:inline">(coincidio con ${r.matched_draw})</span>` : ''}</p>
-            <div class="numbers-list">${chips(r.numbers, matchedNum)}</div>
+            ${chipsMaybeCollapsed(r.numbers, matchedNum)}
           </div>
         `;}).join('')}
       </div>
@@ -109,10 +125,10 @@ onSnapshot(query(collection(db, 'predictions'), where('date', '==', dateToday)),
   renderShortlist();
 });
 
-// --- Lista corta combinada: cruza "atrasados" (nuestro propio historico,
-// calculado en stats/latest) con lo que predicen las fuentes externas de
-// hoy. Es solo para no tener que mirar 30 numeros sueltos -- no es una
-// garantia de nada, el sorteo sigue siendo independiente cada vez.
+// --- Lista corta combinada: numeros que estan a la vez "atrasados" en
+// nuestro propio historico Y predichos hoy por alguna fuente externa.
+// Es la primera tarjeta despues de los sorteos de hoy porque es el
+// resumen mas accionable -- el resto de la pagina es detalle/auditoria.
 onSnapshot(doc(db, 'stats', 'latest'), (snap) => {
   latestStats = snap.exists() ? snap.data() : null;
   renderShortlist();
@@ -127,9 +143,6 @@ function renderShortlist() {
 
   const overdueMap = new Map(latestStats.overdue.map(o => [String(o.num).padStart(2, '0'), o.draws_since]));
 
-  // Union de numeros predichos por CUALQUIER fuente externa (yelu_lucky,
-  // yelu_hot7, yelu_hot30 -- son 3 listas del MISMO sitio, asi que cuentan
-  // como una sola señal "externa", no como señales independientes entre si).
   const predictedSet = new Set();
   if (latestPredictions && latestPredictions.length) {
     for (const r of latestPredictions) {
@@ -137,12 +150,6 @@ function renderShortlist() {
     }
   }
 
-  // Solo entra a la lista corta un numero que este REALMENTE atrasado en
-  // nuestro propio historico Y que ademas alguna fuente externa lo
-  // prediga hoy -- dos señales de origen distinto, no dos listas del
-  // mismo sitio sumando puntos entre si (eso fue justo el bug: "09"
-  // salia con solo estar en yelu_hot7 + yelu_hot30, sin estar atrasado
-  // para nada, porque ambas listas son del mismo sitio).
   const ranked = [...overdueMap.entries()]
     .filter(([num]) => predictedSet.has(num))
     .sort((a, b) => b[1] - a[1])
@@ -151,8 +158,8 @@ function renderShortlist() {
   if (ranked.length === 0) {
     el.innerHTML = `
       <div class="card">
-        <h2>Lista corta combinada</h2>
-        <p class="note">Hoy ningun numero esta a la vez "atrasado" en nuestro historico y predicho por yelu.cr. Sin cruce, no hay lista corta que mostrar.</p>
+        <h2>Numeros a seguir hoy</h2>
+        <p class="note">Hoy ningun numero esta a la vez atrasado en nuestro historico y predicho por yelu.cr. Sin cruce, no hay lista corta que mostrar.</p>
       </div>
     `;
     return;
@@ -160,8 +167,8 @@ function renderShortlist() {
 
   el.innerHTML = `
     <div class="card">
-      <h2>Lista corta combinada</h2>
-      <p class="note">Solo numeros que cumplen las DOS cosas: llevan mas sorteos sin salir en nuestro propio historico, Y ademas alguna fuente externa (yelu.cr) los predice para hoy. Reduce el ruido de mirar 30 numeros sueltos -- no cambia la probabilidad real de cada numero.</p>
+      <h2>Numeros a seguir hoy</h2>
+      <p class="note">Cumplen las dos cosas: llevan mas sorteos sin salir en nuestro historico, y ademas yelu.cr los predice hoy. No cambia la probabilidad real de cada numero -- es solo para no revisar 30 numeros sueltos.</p>
       <div class="numbers-list">
         ${ranked.map(([num, draws_since]) => `<span class="num-chip" title="atrasado: ${draws_since} sorteos sin salir">${num}</span>`).join('')}
       </div>
@@ -196,6 +203,9 @@ onSnapshot(doc(db, 'predictions_summary', 'latest'), (snap) => {
   `;
 });
 
+// --- Ultimos registros: ahora muestra tambien QUE numeros predijo cada
+// fuente ese dia (antes solo se veia si acerto o no, sin poder revisar
+// que habian dicho cuando fallaban).
 onSnapshot(query(collection(db, 'predictions'), orderBy('date', 'desc'), limit(30)), (snap) => {
   const el = document.getElementById('history');
   if (snap.empty) { el.innerHTML = ''; return; }
@@ -204,11 +214,19 @@ onSnapshot(query(collection(db, 'predictions'), orderBy('date', 'desc'), limit(3
     <div class="card">
       <h2>Ultimos 30 registros</h2>
       <table>
-        <thead><tr><th>Fecha</th><th>Fuente</th><th>Resultado</th><th>Sorteo</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Fuente</th><th>Predijo</th><th>Resultado</th><th>Sorteo</th></tr></thead>
         <tbody>
-          ${rows.map(r => `
-            <tr><td class="mono">${r.date}</td><td>${r.source}</td><td>${pillFor(r.hit)}</td><td class="mono">${r.matched_draw || '-'}</td></tr>
-          `).join('')}
+          ${rows.map(r => {
+            const matchedNum = matchedNumberFrom(r.matched_draw);
+            return `
+            <tr>
+              <td class="mono">${r.date}</td>
+              <td>${r.source}</td>
+              <td>${chipsCompactForRow(r.numbers || [], matchedNum)}</td>
+              <td>${pillFor(r.hit)}</td>
+              <td class="mono">${r.matched_draw || '-'}</td>
+            </tr>
+          `;}).join('')}
         </tbody>
       </table>
     </div>

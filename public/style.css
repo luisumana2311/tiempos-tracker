@@ -157,3 +157,15 @@ td.mono, th.mono { font-family: 'JetBrains Mono', monospace; }
 .pill.pending { background: var(--violet-soft); color: var(--violet); }
 
 .loading { color: var(--ink-soft); font-size: 14px; padding: 20px 0; font-family: 'JetBrains Mono', monospace; }
+
+details summary {
+  cursor: pointer; color: var(--violet); font-weight: 600; font-size: 13px;
+  margin-bottom: 8px; list-style: none;
+}
+details summary::-webkit-details-marker { display: none; }
+details summary::before { content: '▸ '; }
+details[open] summary::before { content: '▾ '; }
+details .numbers-list { margin-top: 4px; }
+
+td .numbers-list { gap: 5px; }
+td .num-chip { font-size: 12px; padding: 3px 7px; min-width: 26px; }
