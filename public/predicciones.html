@@ -18,6 +18,7 @@
 
   <div id="draws-today"><p class="loading">Cargando sorteos de hoy...</p></div>
   <div id="today"><p class="loading">Cargando predicciones de hoy...</p></div>
+  <div id="shortlist"></div>
   <div id="summary"></div>
   <div id="history"></div>
 </div>
@@ -54,6 +55,9 @@ function matchedNumberFrom(matchedDraw) {
   return m ? m[1].padStart(2, '0') : null;
 }
 
+let latestStats = null;
+let latestPredictions = null;
+
 // --- Sorteos de hoy: se actualiza solo en vivo a medida que van saliendo ---
 const dateToday = todayCR();
 onSnapshot(query(collection(db, 'draws'), where('date', '==', dateToday)), (snap) => {
@@ -85,23 +89,84 @@ onSnapshot(query(collection(db, 'predictions'), where('date', '==', dateToday)),
   const el = document.getElementById('today');
   if (snap.empty) {
     el.innerHTML = '<div class="card"><h2>Predicciones de hoy</h2><p class="note">Aun no se ha capturado la prediccion de hoy (llega en la manana, hora Costa Rica).</p></div>';
+  } else {
+    const rows = snap.docs.map(d => d.data());
+    el.innerHTML = `
+      <div class="card">
+        <h2>Predicciones de hoy</h2>
+        ${rows.map(r => {
+          const matchedNum = matchedNumberFrom(r.matched_draw);
+          return `
+          <div style="margin-bottom:14px;">
+            <p class="note" style="margin-bottom:6px;"><strong>${r.kind}</strong> · baseline por azar: ${r.baseline_pct}% &nbsp; ${pillFor(r.hit)}${matchedNum ? ` <span class="note" style="display:inline">(coincidio con ${r.matched_draw})</span>` : ''}</p>
+            <div class="numbers-list">${chips(r.numbers, matchedNum)}</div>
+          </div>
+        `;}).join('')}
+      </div>
+    `;
+  }
+  latestPredictions = snap.empty ? [] : snap.docs.map(d => d.data());
+  renderShortlist();
+});
+
+// --- Lista corta combinada: cruza "atrasados" (nuestro propio historico,
+// calculado en stats/latest) con lo que predicen las fuentes externas de
+// hoy. Es solo para no tener que mirar 30 numeros sueltos -- no es una
+// garantia de nada, el sorteo sigue siendo independiente cada vez.
+onSnapshot(doc(db, 'stats', 'latest'), (snap) => {
+  latestStats = snap.exists() ? snap.data() : null;
+  renderShortlist();
+});
+
+function renderShortlist() {
+  const el = document.getElementById('shortlist');
+  if (!latestStats || !Array.isArray(latestStats.overdue) || !latestStats.overdue.length) {
+    el.innerHTML = '';
     return;
   }
-  const rows = snap.docs.map(d => d.data());
+
+  const overdueMap = new Map(latestStats.overdue.map(o => [String(o.num).padStart(2, '0'), o.draws_since]));
+  const scores = new Map();
+  const bump = (num, amount) => scores.set(num, (scores.get(num) || 0) + amount);
+
+  for (const num of overdueMap.keys()) bump(num, 1);
+
+  if (latestPredictions && latestPredictions.length) {
+    for (const r of latestPredictions) {
+      const weight = r.source === 'yelu_hot30' ? 0.5 : 1;
+      for (const raw of r.numbers) bump(String(raw).padStart(2, '0'), weight);
+    }
+  }
+
+  const ranked = [...scores.entries()]
+    .filter(([, score]) => score >= 1.5) // al menos dos señales de acuerdo (atrasado + alguna prediccion externa)
+    .sort((a, b) => b[1] - a[1] || (overdueMap.get(b[0]) || 0) - (overdueMap.get(a[0]) || 0))
+    .slice(0, 10);
+
+  if (ranked.length === 0) {
+    el.innerHTML = `
+      <div class="card">
+        <h2>Lista corta combinada</h2>
+        <p class="note">Hoy ningun numero coincide entre "atrasados" y las predicciones externas capturadas. Sin cruce, no hay lista corta que mostrar.</p>
+      </div>
+    `;
+    return;
+  }
+
   el.innerHTML = `
     <div class="card">
-      <h2>Predicciones de hoy</h2>
-      ${rows.map(r => {
-        const matchedNum = matchedNumberFrom(r.matched_draw);
-        return `
-        <div style="margin-bottom:14px;">
-          <p class="note" style="margin-bottom:6px;"><strong>${r.kind}</strong> · baseline por azar: ${r.baseline_pct}% &nbsp; ${pillFor(r.hit)}${matchedNum ? ` <span class="note" style="display:inline">(coincidio con ${r.matched_draw})</span>` : ''}</p>
-          <div class="numbers-list">${chips(r.numbers, matchedNum)}</div>
-        </div>
-      `;}).join('')}
+      <h2>Lista corta combinada</h2>
+      <p class="note">Cruce entre numeros "atrasados" (no salen hace mas sorteos en nuestro propio historico) y los numeros que las fuentes externas dicen para hoy. Reduce el ruido de mirar 30 numeros sueltos -- no cambia la probabilidad real de cada numero.</p>
+      <div class="numbers-list">
+        ${ranked.map(([num, score]) => {
+          const atraso = overdueMap.get(num);
+          const title = atraso !== undefined ? `atrasado: ${atraso} sorteos sin salir` : 'solo predicho por fuente externa';
+          return `<span class="num-chip" title="${title}">${num}</span>`;
+        }).join('')}
+      </div>
     </div>
   `;
-});
+}
 
 onSnapshot(doc(db, 'predictions_summary', 'latest'), (snap) => {
   const el = document.getElementById('summary');

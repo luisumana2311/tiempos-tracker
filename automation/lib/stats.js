@@ -55,6 +55,18 @@ function computeStats(draws) {
   const hot = freq.map((c, num) => ({ num, count: c })).sort((a, b) => b.count - a.count).slice(0, 8);
   const cold = freq.map((c, num) => ({ num, count: c })).sort((a, b) => a.count - b.count).slice(0, 8);
 
+  // "Atrasados": numeros que llevan mas sorteos sin salir, calculado con
+  // nuestro propio historico (no depende de ningun sitio externo). Se
+  // busca el indice del ultimo sorteo (en orden cronologico) en el que
+  // aparecio cada numero; draws_since = cuantos sorteos han pasado desde
+  // entonces (0 = salio en el ultimo sorteo registrado).
+  const lastSeenIndex = new Array(100).fill(-1);
+  sorted.forEach((d, i) => { lastSeenIndex[parseInt(d.numero, 10)] = i; });
+  const overdue = lastSeenIndex
+    .map((idx, num) => ({ num, draws_since: idx === -1 ? n : (n - 1 - idx) }))
+    .sort((a, b) => b.draws_since - a.draws_since)
+    .slice(0, 15);
+
   return {
     n,
     date_from: sorted[0]?.date || null,
@@ -68,7 +80,7 @@ function computeStats(draws) {
     red, red_rate: round4(n ? red / n : 0),
     reps, reps_rate: round4(n ? reps / n : 0),
     slot_stats: slotStats,
-    hot, cold,
+    hot, cold, overdue,
     updated_at: new Date().toISOString()
   };
 }
